@@ -1,0 +1,13 @@
+import {readFile,mkdir,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const root=path.dirname(fileURLToPath(import.meta.url));
+const read=name=>readFile(path.join(root,name),'utf8');
+const [html,css,engine,art,app,icon]=await Promise.all(['index.html','styles.css','engine.js','art.js','app.js','favicon.svg'].map(read));
+const names=[...engine.matchAll(/export (?:const|function) (\w+)/g)].map(m=>m[1]);
+const bundle='const E=(()=>{\n'+engine.replaceAll('export ','')+'\nreturn {'+names.join(',')+'};})();\n'+art.replaceAll('export ','')+'\n'+app.replace(/^import .*;\r?\n/gm,'');
+const standalone=html.replace('<link rel="stylesheet" href="./styles.css">','<style>'+css+'</style>').replace('href="./favicon.svg"','href="data:image/svg+xml,'+encodeURIComponent(icon)+'"').replace('<script type="module" src="./app.js"></script>','<script type="module">'+bundle.replaceAll('</script','<\\/script')+'</script>');
+await mkdir(path.join(root,'dist'),{recursive:true});
+await writeFile(path.join(root,'dist','index.html'),standalone);
+await writeFile(path.join(root,'dist','.nojekyll'),'');
+console.log('Built dist/index.html - standalone, no runtime dependencies.');
