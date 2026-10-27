@@ -45,7 +45,7 @@ export function members(s) { return s.people.filter(n=>n.active); }
 export function costFor(s,key) { const b=BUILDINGS[key];return Object.fromEntries(Object.entries(b.base).map(([r,n])=>[r,Math.ceil(n*b.scale**s.buildings[key])])); }
 export function canPay(s,cost) { return Object.entries(cost).every(([k,n])=>Number.isFinite(n)&&n>=0&&s.resources[k]>=n); }
 export function log(s,text,kind='notice') { s.logs.unshift({id:++s.serial,hour:s.hour,text,kind});s.logs=s.logs.slice(0,100); }
-function change(s,key,amount,book=true) { const before=s.resources[key];s.resources[key]=cap(before+amount,0,capacity(s,key));const delta=s.resources[key]-before;if(book)s.books[key]=cap(s.books[key]+delta,0,capacity(s,key));return delta; }
+function change(s,key,amount,book=true) { const before=s.resources[key];s.resources[key]=cap(before+amount,0,capacity(s,key));const delta=s.resources[key]-before;if(book)s.books[key]=cap(s.books[key]+delta,0,capacity(s,key));if(s.gathered&&amount>0&&['wood','stone'].includes(key))s.gathered[key]+=Math.max(0,delta);return delta; }
 function spend(s,cost) { for(const [key,n] of Object.entries(cost))change(s,key,-n); }
 function transaction(s,kind,amount,actor=null,resource='coin',extra={}) { s.ledger.unshift({id:++s.serial,hour:s.hour,kind,amount,resource,actor,...extra});s.ledger=s.ledger.slice(0,240); }
 export function makePerson(s,id,job='idle') {
@@ -55,9 +55,9 @@ export function makePerson(s,id,job='idle') {
  return {id,name:NAMES[(id-1)%NAMES.length]+(id>NAMES.length?String(Math.floor(id/NAMES.length)):''),active:true,job,shift:0,hours:8,appearance:LOOKS[Math.floor(random(s)*LOOKS.length)],skills,potentials,traits:[...new Set([first,second])],honesty:35+Math.floor(random(s)*60),courage:15+Math.floor(random(s)*75),greed:15+Math.floor(random(s)*65),trust:15,wealth:2+random(s)*3,pressure:0,happiness:76,fatigue:4,arrears:0,contact:0,daysTogether:0,workToday:0,employedToday:0,baseWage:.8,emergency:null,privateNotes:[],lastIncident:-100,knownBy:{},status:'新入山门'};
 }
 export function initialState(now=Date.now(),seed=537191) {
- const s={version:VERSION,savedAt:now,hour:0,carry:0,rng:seed>>>0,serial:0,player:{role:'foreman',hours:12,skills:Object.fromEntries(Object.keys(JOBS).map(k=>[k,k==='hr'?10:30]))},resources:{grain:100,wood:45,stone:25,coin:120,herb:0,knowledge:0,qi:0,pill:0},books:{},reports:{},buildings:Object.fromEntries(Object.keys(BUILDINGS).map(k=>[k,0])),plots:[{crop:'rice'},{crop:'rice'},{crop:'rice'}],people:[],candidates:[],nextPerson:5,techs:[],policies:{hours:8,overtime:true,benefits:false,wage:1,review:true},orders:{hr:{target:6,priority:'farmer',reserveDays:3},trade:{auto:true,reserve:80},deputy:{autoBuild:true,budget:150}},requests:[],projects:[],research:null,archives:{},incidents:[],cases:[],inquiries:[],ledger:[],logs:[],autoClocks:{},stats:{produced:0,sold:0,paid:0,contributions:0,lost:0,recovered:0,completed:0,researched:0},benefitFund:0,lastDay:{production:0,consumption:0,revenue:0,wages:0},today:{production:0,consumption:0,revenue:0,wages:0},lastPayroll:[],recentDisclosures:[]};
- s.paused=false;
- for(const [i,job] of ['farmer','woodcutter','miner','treasurer'].entries()){const n=makePerson(s,i+1,job);n.honesty=[88,78,74,56][i];n.traits=i===0?['green','upright']:i===3?['careful','greedy']:n.traits;s.people.push(n);}
+ const s={version:VERSION,savedAt:now,hour:0,carry:0,rng:seed>>>0,serial:0,player:{role:'farmer',hours:12,skills:Object.fromEntries(Object.keys(JOBS).map(k=>[k,k==='hr'?10:30]))},resources:{grain:100,wood:45,stone:25,coin:120,herb:0,knowledge:0,qi:0,pill:0},books:{},reports:{},buildings:Object.fromEntries(Object.keys(BUILDINGS).map(k=>[k,0])),plots:[{crop:'rice'},{crop:'rice'},{crop:'rice'}],people:[],candidates:[],nextPerson:5,techs:[],policies:{hours:8,overtime:true,benefits:false,wage:1,review:true},orders:{hr:{target:6,priority:'farmer',reserveDays:3},trade:{auto:true,reserve:80},deputy:{autoBuild:true,budget:150}},requests:[],projects:[],research:null,archives:{},incidents:[],cases:[],inquiries:[],ledger:[],logs:[],autoClocks:{},stats:{produced:0,sold:0,paid:0,contributions:0,lost:0,recovered:0,completed:0,researched:0},benefitFund:0,lastDay:{production:0,consumption:0,revenue:0,wages:0},today:{production:0,consumption:0,revenue:0,wages:0},lastPayroll:[],recentDisclosures:[]};
+ s.paused=false;s.governance=1;s.unlockedJobs=['farmer'];s.tutorialSeen=[];s.workRecords={};s.workReports={};s.gathered={wood:0,stone:0};s.player.field=0;s.plots.forEach((p,i)=>p.owner=i===0?'player':i);
+ for(const [i,job] of ['farmer','farmer','farmer','farmer'].entries()){const n=makePerson(s,i+1,job);n.honesty=[88,78,74,56][i];n.traits=i===0?['green','upright']:i===3?['careful','greedy']:n.traits;s.people.push(n);}
  s.books={...s.resources};for(const k of Object.keys(RES))s.reports[k]={value:s.resources[k],hour:0,by:'开山盘点',source:'实物盘点'};
  s.productionReport={normal:averageRates(s,1).grain+s.people.length*2,hour:0,by:'开山测产'};
  for(let i=0;i<3;i++){const n=makePerson(s,s.nextPerson++);n.active=false;s.candidates.push(n);}
@@ -79,7 +79,7 @@ export function averageRates(s,seasonOverride=season(s)) {
  rates.coin=-operatingCost(s);return rates;
 }
 export function visibleResources(s,role=s.player.role) { const keys=JOBS[role].keys;return Object.fromEntries(Object.keys(RES).map(k=>[k,keys.includes(k)?{value:s.resources[k],kind:'实察',hour:s.hour}:{value:s.reports[k].value,kind:'账报',hour:s.reports[k].hour}])); }
-export function visibleGrainRates(s,role=s.player.role) { if(['foreman','farmer'].includes(role))return {current:averageRates(s).grain,winter:averageRates(s,3).grain,source:'本岗测算'};return {current:s.productionReport.normal*seasonFactor(s)-members(s).length*2,winter:s.productionReport.normal*.25-members(s).length*2,source:'上报测产估算'}; }
+export function visibleGrainRates(s,role=s.player.role) { const record=role==='farmer'?ownWork(s,role):null,reports=ROLE_TREE[role]?directReports(s,role):[];const grain=record?.totals.grain||reports.reduce((sum,r)=>sum+(r.payload.totals?.grain||0),0);return {current:grain,winter:null,source:role==='farmer'?'本人累计实收':'已提交报告累计收成'}; }
 export function familiarity(s,n,who='player') { return n.knownBy[String(who)]?.contact||0; }
 export function insight(s,n,who=observer(s,'hr')) {
  if(!who)return {tier:0,contact:0,skills:[],traits:[],character:null};const contact=familiarity(s,n,who.id), bonus=s.techs.includes('records')?5:0, score=who.skill+bonus;
@@ -91,7 +91,7 @@ function getPerson(s,id) { return [...s.people,...s.candidates].find(n=>n.id===N
 function recordContact(s,n,who,amount) { const k=String(who.id);n.knownBy[k]??={contact:0,lastHour:s.hour};n.knownBy[k].contact+=amount;n.knownBy[k].lastHour=s.hour;if(who.id==='player')s.player.skills.hr=cap(s.player.skills.hr+.08*amount,0,100);else {const hr=getPerson(s,who.id);hr.skills.hr=cap(hr.skills.hr+.08*amount*hr.potentials.hr,0,100);} }
 function fileAssessment(s,n,who) { const info=insight(s,n,who);s.archives[n.id]??=[];s.archives[n.id].unshift({hour:s.hour,by:who.name,kind:'评价',text:info.tier?`考察深度 ${info.tier}/4；${info.skills.slice(0,2).map(v=>JOBS[v.job].name+'约 '+v.min+'–'+v.max).join('，')}。${info.traits.length?'观察词条：'+info.traits.map(t=>TRAITS[t].name).join('、')+'。':''}${info.character?info.character.honesty+'；'+info.character.courage+'。':''}`:'目前仅能确认外表与基本履历，能力及为人尚待共事。'});s.archives[n.id]=s.archives[n.id].slice(0,12); }
 export function request(s,kind,text,from) { const existing=s.requests.find(r=>r.kind===kind&&r.status!=='完成');if(existing)return existing;const r={id:++s.serial,kind,text,from,hour:s.hour,status:'待协调'};s.requests.unshift(r);s.requests=s.requests.slice(0,30);log(s,`${from}：${text}`,'request');return r; }
-function hire(s,n,job,who) { if(members(s).length>=housing(s)){request(s,'housing','住处不足，需要扩建弟子居。',who.name);return '住处已满，已登记住房需求';}if(!JOBS[job])return '岗位不存在';if(JOBS[job].building&&!s.buildings[JOBS[job].building])job='farmer';if(s.resources.coin<3)return '入门安置需 3 灵石';spend(s,{coin:3});transaction(s,'入门安置',3,n.id);n.active=true;n.job=job;n.hours=s.policies.hours;n.shift=(staff(s,job).length*n.hours)%24;n.status='已任用';n.employedToday=0;s.candidates=s.candidates.filter(c=>c.id!==n.id);s.people.push(n);fileAssessment(s,n,who);log(s,`${who.name}接纳${n.name}，安排为${JOBS[job].name}。`);return null; }
+function hire(s,n,job,who) { if(members(s).length>=housing(s)){request(s,'housing','住处不足，需要扩建弟子居。',who.name);return '住处已满，已登记住房需求';}if(!JOBS[job])return '岗位不存在';if(!jobUnlocked(s,job))job='farmer';if(JOBS[job].building&&!s.buildings[JOBS[job].building])job='farmer';if(s.resources.coin<3)return '入门安置需 3 灵石';spend(s,{coin:3});transaction(s,'入门安置',3,n.id);n.active=true;n.job=job;n.hours=s.policies.hours;n.shift=(staff(s,job).length*n.hours)%24;n.status='已任用';n.employedToday=0;s.candidates=s.candidates.filter(c=>c.id!==n.id);s.people.push(n);fileAssessment(s,n,who);log(s,`${who.name}接纳${n.name}，安排为${JOBS[job].name}。`);return null; }
 function queueBuild(s,key,by) { if(!BUILDINGS[key])return '未知建筑';if(s.projects.length>=3)return '营造队列最多同时安排 3 项';if(key==='field'&&s.plots.length+s.projects.filter(p=>p.key==='field').length>=24)return '灵田已达当前 24 方规模';if(s.projects.some(p=>p.key===key))return '此项目已在队列中';const cost=costFor(s,key);if(Object.entries(cost).some(([k,n])=>n>capacity(s,k)))return '储量上限不足，需先扩建纳物仓';if(!canPay(s,cost))return '实存材料不足；请核实库存或等待生产';spend(s,cost);transaction(s,'营造预付',cost.coin||0,null,'coin',{building:key});s.projects.push({id:++s.serial,key,progress:0,required:BUILDINGS[key].hours,by,cost});log(s,`${by}安排营造「${BUILDINGS[key].name}」。`);return null; }
 export function misconductRisk(s,n) {
  const handles=['treasurer','hr','builder','foreman'].includes(n.job);if(!handles||!n.active)return 0;
@@ -110,7 +110,7 @@ export function caseView(s,c) { const evidence=c.evidence||[];return {id:c.id,ti
 function openCase(s,incident,source,text) { let c=s.cases.find(v=>v.incident===incident.id);if(!c){c={id:++s.serial,incident:incident.id,title:incident.kind==='bribe'?'任用与往来异常':'收成与入库不符',hour:s.hour,status:'待核查',requester:source,evidence:[]};s.cases.unshift(c);log(s,`${source}移交线索：${c.title}。`,'case');}return c; }
 function evidence(s,c,type,by,text,people=[]) { if(c.evidence.some(e=>e.type===type))return;c.evidence.push({id:++s.serial,type,hour:s.hour,by,text,people});c.status=new Set(c.evidence.map(e=>e.type)).size>=2?'事实待处置':'核查中'; }
 export function startInquiry(s,type,caseId=null) {
- const allowed={yield:['foreman','farmer'],stock:['treasurer'],payments:['auditor'],trail:['investigator'],relations:['investigator']};if(!allowed[type]?.includes(s.player.role))return '请切换到负责此项核查的岗位';if(s.inquiries.some(q=>q.type===type&&q.caseId===caseId))return '此项核查已在进行';if(s.inquiries.length>=5)return '待办核查已满，请先处理现有事项';if(caseId&&!s.cases.some(c=>c.id===Number(caseId)&&c.status!=='已结案'))return '案件不存在或已经结案';s.inquiries.push({id:++s.serial,type,caseId:caseId?Number(caseId):null,role:s.player.role,progress:0,required:type==='relations'?10:6});return null;
+ const allowed={yield:['auditor'],stock:['auditor'],payments:['auditor'],trail:['investigator'],relations:['investigator']};if(!allowed[type]?.includes(s.player.role))return '请切换到负责此项核查的岗位';if(s.inquiries.some(q=>q.type===type&&q.caseId===caseId))return '此项核查已在进行';if(s.inquiries.length>=5)return '待办核查已满，请先处理现有事项';if(caseId&&!s.cases.some(c=>c.id===Number(caseId)&&c.status!=='已结案'))return '案件不存在或已经结案';s.inquiries.push({id:++s.serial,type,caseId:caseId?Number(caseId):null,role:s.player.role,progress:0,required:type==='relations'?10:6});return null;
 }
 function finishInquiry(s,q,by) {
  if(q.type==='interview'){const n=getPerson(s,q.target),who=observer(s,'hr');if(n&&who){recordContact(s,n,who,4);fileAssessment(s,n,who);log(s,`${by}完成与${n.name}的接触考察，评价已写入档案。`,'verified');}return;}
@@ -152,12 +152,12 @@ function autoRole(s,job,n) {
  }
  if(job==='deputy'&&s.orders.deputy.autoBuild){const r=s.requests.find(v=>v.kind==='housing'&&v.status==='待协调');if(r){const cost=costFor(s,'hut');if((cost.coin||0)<=s.orders.deputy.budget){r.status='已派营造';if(!s.projects.some(p=>p.key==='hut')){const error=queueBuild(s,'hut',by);if(error){r.status='待协调';r.text='扩建等待实际材料与预算到位。';}}}}}
  if(job==='treasurer'&&s.orders.trade.auto){for(const [key,reserve] of [['grain',s.orders.trade.reserve],['herb',12],['pill',4]]){const excess=Math.floor(s.resources[key]-reserve);if(excess>=5)trade(s,key,Math.min(excess,30),by);}}
- if(job==='foreman'){for(const i of s.incidents.filter(i=>!i.resolved&&i.kind==='diversion')){if(s.books.grain-s.resources.grain>1){const c=openCase(s,i,by,'运粮核对');evidence(s,c,'goods',by,'灵植岗复核收成与入库，发现批次存在无据差额。');}}publish(s,'foreman',n.id);}
+ if(job==='foreman')submitReport(s,'foreman',n.id);
  if(job==='auditor')finishInquiry(s,{type:'payments',caseId:null},by);
  if(job==='investigator'){const c=s.cases.find(c=>c.status!=='已结案');if(c)finishInquiry(s,{type:c.evidence.some(e=>e.type==='route')?'relations':'trail',caseId:c.id},by);}
- if(job==='treasurer')publish(s,'treasurer',n.id);
+ if(job==='treasurer')publish(s,'treasurer',n.id);submitReport(s,job,n.id);
 }
-export function publish(s,job=s.player.role,by='亲自核实') { const n=typeof by==='number'?getPerson(s,by):null;for(const key of JOBS[job].keys){let value=s.resources[key];if(n&&s.incidents.some(i=>!i.resolved&&i.actor===n.id))value=s.books[key];s.reports[key]={value,hour:s.hour,by:n?.name||by,source:n?'岗位报告':'现场核实'};}if(['foreman','farmer'].includes(job))s.productionReport={normal:averageRates(s,1).grain+members(s).length*2,hour:s.hour,by:n?.name||by};log(s,`${n?.name||by}更新了${JOBS[job].name}的交接报告。`,'report');return null; }
+function publishLegacy(s,job=s.player.role,by='亲自核实') { const n=typeof by==='number'?getPerson(s,by):null;for(const key of JOBS[job].keys){let value=s.resources[key];if(n&&s.incidents.some(i=>!i.resolved&&i.actor===n.id))value=s.books[key];s.reports[key]={value,hour:s.hour,by:n?.name||by,source:n?'岗位报告':'现场核实'};}if(['foreman','farmer'].includes(job))s.productionReport={normal:averageRates(s,1).grain+members(s).length*2,hour:s.hour,by:n?.name||by};log(s,`${n?.name||by}更新了${JOBS[job].name}的交接报告。`,'report');return null; }
 function trade(s,key,amount,by='仓储财务') { if(!PRICES[key]||!Number.isFinite(amount)||amount<=0)return '此物不可交易';amount=Math.min(amount,s.resources[key]);if(amount<1)return '可售库存不足';const revenue=amount*PRICES[key];if(s.resources.coin+revenue>capacity(s,'coin'))return '灵石仓储已满，先扩仓或安排支出';change(s,key,-amount);change(s,'coin',revenue);s.stats.sold+=revenue;s.today.revenue+=revenue;transaction(s,'山市出售',revenue,null,'coin',{item:key,quantity:amount,by});return null; }
 function payroll(s) {
  const roster=members(s), dues=roster.map(n=>{const due=n.baseWage*s.policies.wage*(n.employedToday/24)+(s.policies.overtime?n.baseWage*s.policies.wage*.5*Math.max(0,n.workToday-8)/8:0);return {n,due};});const total=dues.reduce((a,b)=>a+b.due,0), ratio=total?Math.min(1,s.resources.coin/total):1;s.lastPayroll=[];
@@ -171,22 +171,22 @@ function payroll(s) {
 export function householdEvent(s,n,cost=12) { if(n.emergency)return;let cover=Math.min(s.benefitFund,cost*.75);s.benefitFund-=cover;const own=Math.min(n.wealth,cost-cover);n.wealth-=own;const remaining=cost-cover-own;n.emergency=remaining>.01?{kind:'家人患病',cost,remaining,hour:s.hour}:null;n.pressure=cap(n.pressure+remaining,0,40);if(cover)transaction(s,'福利救助',cover,n.id);if(n.trust>12||s.player.role==='hr'){log(s,`${n.name}向人事报备家中急病${cover?`，互助保障支出 ${cover.toFixed(1)} 灵石`:''}。`,'personal');s.archives[n.id]??=[];s.archives[n.id].unshift({hour:s.hour,by:n.name,kind:'自述',text:`家人患病，尚需 ${remaining.toFixed(1)} 灵石；此为本人求助记录。`});}}
 function advanceHour(s) {
  const h=s.hour, mult=(s.techs.includes('formation')?1.2:1), fed=s.resources.grain>0?1:.35;let farm=power(s,'farmer');const leader=power(s,'foreman');let produced=0;
- for(const p of s.plots){const c=CROPS[p.crop];const out=(c.base+c.labor*farm/s.plots.length)*(s.techs.includes('irrigation')?1.25:1)*(1+Math.min(.25,leader*.08))*mult*(p.crop==='rice'?seasonFactor(s):1)*fed;const got=change(s,c.resource,out);if(c.resource==='grain')produced+=got;}
+ for(const p of s.plots){const c=CROPS[p.crop];const out=(c.base+c.labor*farm/s.plots.length)*(s.techs.includes('irrigation')?1.25:1)*(1+Math.min(.25,leader*.08))*mult*(p.crop==='rice'?seasonFactor(s):1)*fed;const got=change(s,c.resource,out);recordPlot(s,p,c.resource,got);if(c.resource==='grain')produced+=got;}
  s.today.production+=produced;s.stats.produced+=produced;const consumed=Math.min(s.resources.grain,members(s).length*2/24);change(s,'grain',-consumed);s.today.consumption+=consumed;
  for(const n of members(s)){
   n.employedToday++;const active=onDuty(s,n,h);if(active&&n.job!=='idle'){
    const p=skillFactor(n,n.job)*mult*fed;n.workToday++;n.fatigue=cap(n.fatigue+(n.workToday>8?2.2:1),0,100);n.skills[n.job]=cap(n.skills[n.job]+.025*n.potentials[n.job]*(n.traits.includes('scholarly')?1.5:1),0,100);
-   if(n.job==='woodcutter')change(s,'wood',.8*p);if(n.job==='miner')change(s,'stone',.6*p);if(n.job==='scholar'){change(s,'knowledge',.9*p);change(s,'qi',.5*p);}
-   if(n.job==='alchemist'&&s.techs.includes('alchemy')&&canPay(s,{herb:1.5*p,qi:.75*p})&&s.resources.pill<capacity(s,'pill')){spend(s,{herb:1.5*p,qi:.75*p});change(s,'pill',.25*p);}
+   if(n.job==='woodcutter')recordWork(s,n.id,n.job,'wood',change(s,'wood',.8*p));if(n.job==='miner')recordWork(s,n.id,n.job,'stone',change(s,'stone',.6*p));if(n.job==='scholar'){recordWork(s,n.id,n.job,'knowledge',change(s,'knowledge',.9*p));recordWork(s,n.id,n.job,'qi',change(s,'qi',.5*p));}
+   if(n.job==='alchemist'&&s.techs.includes('alchemy')&&canPay(s,{herb:1.5*p,qi:.75*p})&&s.resources.pill<capacity(s,'pill')){spend(s,{herb:1.5*p,qi:.75*p});recordWork(s,n.id,n.job,'pill',change(s,'pill',.25*p));}
    s.autoClocks[n.job]=(s.autoClocks[n.job]||0)+p;if(s.autoClocks[n.job]>=6){s.autoClocks[n.job]-=6;autoRole(s,n.job,n);}
    if(['hr','foreman','deputy'].includes(n.job)){const other=members(s).filter(v=>v.id!==n.id);if(other.length){const target=other[(Math.floor(h/3)+n.id)%other.length];recordContact(s,target,{id:n.id,name:n.name,skill:n.skills.hr},.2);}}
   } else n.fatigue=cap(n.fatigue-1.8,0,100);
  }
- if(h%24<s.player.hours){s.player.skills[s.player.role]=cap(s.player.skills[s.player.role]+.025,0,100);if(s.player.role==='woodcutter')change(s,'wood',.65*fed);if(s.player.role==='miner')change(s,'stone',.5*fed);if(s.player.role==='scholar'){change(s,'knowledge',.75*fed);change(s,'qi',.45*fed);}}
- if(s.projects.length){const p=s.projects[0];p.progress+=power(s,'builder')*fed;if(p.progress>=p.required){s.projects.shift();s.buildings[p.key]++;if(p.key==='field')s.plots.push({crop:'rice'});s.stats.completed++;for(const r of s.requests)if(r.kind==='housing'&&p.key==='hut')r.status='完成';log(s,`「${BUILDINGS[p.key].name}」落成，新的发展条件已经具备。`,'milestone');}}
+ if(h%24<s.player.hours){s.player.skills[s.player.role]=cap(s.player.skills[s.player.role]+.025,0,100);if(s.player.role==='woodcutter')recordWork(s,'player','woodcutter','wood',change(s,'wood',.65*fed));if(s.player.role==='miner')recordWork(s,'player','miner','stone',change(s,'stone',.5*fed));if(s.player.role==='scholar'){recordWork(s,'player','scholar','knowledge',change(s,'knowledge',.75*fed));recordWork(s,'player','scholar','qi',change(s,'qi',.45*fed));}if(s.player.role==='alchemist'&&s.techs.includes('alchemy')&&canPay(s,{herb:1.5*fed,qi:.75*fed})&&s.resources.pill<capacity(s,'pill')){spend(s,{herb:1.5*fed,qi:.75*fed});recordWork(s,'player','alchemist','pill',change(s,'pill',.25*fed));}}
+ if(s.projects.length){const p=s.projects[0];p.progress+=power(s,'builder')*fed;if(p.progress>=p.required){s.projects.shift();s.buildings[p.key]++;if(p.key==='field')s.plots.push({crop:'rice',owner:staff(s,'farmer')[0]?.id||'player'});s.stats.completed++;for(const r of s.requests)if(r.kind==='housing'&&p.key==='hut')r.status='完成';log(s,`「${BUILDINGS[p.key].name}」落成，新的发展条件已经具备。`,'milestone');}}
  if(s.research){s.research.progress+=power(s,'scholar')*fed;if(s.research.progress>=s.research.required){const key=s.research.key;s.techs.push(key);s.research=null;s.stats.researched++;log(s,`宗门习得「${TECHS[key].name}」。`,'milestone');}}
  const finished=[];for(const q of s.inquiries){q.progress+=power(s,q.role)*fed;if(q.progress>=q.required){finishInquiry(s,q,observer(s,q.role)?.name||'岗位复核');finished.push(q.id);}}s.inquiries=s.inquiries.filter(q=>!finished.includes(q.id));
- s.hour++;
+ refreshUnlocks(s);s.hour++;
  if(s.hour%24===0){payroll(s);s.lastDay={...s.today};s.productionReport={normal:s.today.production/[1.5,1,1,.25][Math.floor((s.hour-1)/(24*SEASON_DAYS))%4],hour:s.hour,by:'生产交接记录'};s.today={production:0,consumption:0,revenue:0,wages:0};
   if(day(s)%7===0){const pool=members(s);if(pool.length)householdEvent(s,pool[Math.floor(random(s)*pool.length)]);}
   if(day(s)>3)for(const n of members(s))if(s.hour-n.lastIncident>96)commitMisconduct(s,n);
@@ -195,7 +195,7 @@ function advanceHour(s) {
  }
 }
 export function tick(s,seconds) { if(s.paused||!Number.isFinite(seconds)||seconds<=0)return s;s.carry+=Math.min(seconds,28800);while(s.carry+1e-9>=HOUR){s.carry=Math.max(0,s.carry-HOUR);advanceHour(s);}return s; }
-export function act(s,a) {
+function actLegacy(s,a) {
  const role=s.player.role,n=getPerson(s,a.id), need=(roles)=>roles.includes(role)?null:'请先切换到'+roles.map(k=>JOBS[k].name).join('或')+'岗位';
  if(a.type==='role'){if(!JOBS[a.role])return '岗位不存在';s.player.role=a.role;return null;}
  if(a.type==='assign'){if(!n||!n.active)return '弟子不存在';if(a.job!=='idle'&&!JOBS[a.job])return '未知岗位';if(JOBS[a.job]?.building&&!s.buildings[JOBS[a.job].building])return '该 NPC 岗位需要'+BUILDINGS[JOBS[a.job].building].name;n.job=a.job;n.shift=((staff(s,a.job).filter(v=>v.id!==n.id).length)*n.hours)%24;log(s,`${n.name}调任${JOBS[a.job]?.name||'待命'}。`);return null;}
@@ -206,7 +206,7 @@ export function act(s,a) {
  if(a.type==='order'){const e=need(a.section==='hr'?['hr','deputy']:a.section==='trade'?['treasurer','deputy']:['deputy']);if(e)return e;const bounds={target:[0,40],reserveDays:[0,15],reserve:[0,10000],budget:[0,10000]};if(['auto','autoBuild'].includes(a.key))s.orders[a.section][a.key]=!!a.value;else if(a.key==='priority'&&JOBS[a.value])s.orders.hr.priority=a.value;else if(bounds[a.key]&&Number.isFinite(Number(a.value))){const [lo,hi]=bounds[a.key];s.orders[a.section][a.key]=cap(Number(a.value),lo,hi);}else return '目标参数无效';return null;}
  if(a.type==='crop'){const e=need(['foreman','farmer']);if(e)return e;const crop=CROPS[a.crop];if(!crop||!s.plots[a.index])return '灵田或灵种无效';if(crop.tech&&!s.techs.includes(crop.tech))return '需先习得'+TECHS[crop.tech].name;if(s.plots[a.index].crop===a.crop)return null;if(!canPay(s,{coin:crop.price}))return '改种所需灵石不足';spend(s,{coin:crop.price});s.plots[a.index].crop=a.crop;return null;}
  if(a.type==='interview'){const e=need(['hr']);if(e)return e;if(!n)return '受访者不存在';if(s.inquiries.some(q=>q.type==='interview'&&q.target===n.id))return '已经安排接触考察';s.inquiries.push({id:++s.serial,type:'interview',target:n.id,caseId:null,role:'hr',progress:0,required:4});return null;}
- if(a.type==='hire'){const e=need(['hr']);if(e)return e;if(!s.candidates.includes(n))return '请选择尚在山门的候选人';return hire(s,n,a.job||s.orders.hr.priority,{id:'player',name:'亲自任用',skill:s.player.skills.hr});}
+ if(a.type==='hire'){const e=need(['hr']);if(e)return e;if(!s.candidates.includes(n))return '请选择尚在山门的候选人';return hire(s,n,a.job||s.orders.hr.priority,{id:'player',name:'亲自任职',skill:s.player.skills.hr});}
  if(a.type==='build'){const e=need(['builder','deputy']);if(e)return e;return queueBuild(s,a.key,role==='deputy'?'副宗主协调':'营造当值');}
  if(a.type==='coordinate'){const e=need(['deputy']);if(e)return e;const r=s.requests.find(r=>r.id===Number(a.id));if(!r)return '需求不存在';if(r.kind==='housing'){const error=queueBuild(s,'hut','副宗主协调');if(!error)r.status='已派营造';return error;}return '该需求需调整人事或生产安排';}
  if(a.type==='sell'){const e=need(['treasurer']);if(e)return e;return trade(s,a.key,Number(a.amount)||10);}
@@ -223,7 +223,7 @@ export function restore(raw,now=Date.now()) {
  const d=JSON.parse(raw);const finite=(v,min=0,max=1e12)=>Number.isFinite(v)&&v>=min&&v<=max;const integer=(v,min,max)=>Number.isInteger(v)&&v>=min&&v<=max;
  if(d&&d.paused===undefined)d.paused=false;
  if(!d||d.version!==VERSION||!integer(d.hour,0,1e9)||!finite(d.carry,0,HOUR)||!integer(d.rng,0,4294967295)||!integer(d.serial,0,1e12)||!finite(d.savedAt,0,now+60000)||!JOBS[d.player?.role]||![8,12,16].includes(d.player.hours))throw Error('这不是有效的宗门岗位版存档');
- const blank=initialState(now);for(const key of Object.keys(RES)){if(!finite(d.resources?.[key],0,1e6)||!finite(d.books?.[key],0,1e6)||!finite(d.reports?.[key]?.value,0,1e6)||!finite(d.reports[key].hour,0,d.hour))throw Error('资源或交接报告数据无效');}
+ migrateRoles(d);const blank=initialState(now);for(const key of Object.keys(RES)){if(!finite(d.resources?.[key],0,1e6)||!finite(d.books?.[key],0,1e6)||!finite(d.reports?.[key]?.value,0,1e6)||!finite(d.reports[key].hour,0,d.hour))throw Error('资源或交接报告数据无效');}
  if(typeof d.paused!=='boolean'||!Object.hasOwn(JOBS,d.player.role))throw Error('当值状态无效');
  if(!d.productionReport)d.productionReport={normal:28,hour:d.hour,by:'既有交接估算'};
  if(!finite(d.productionReport.normal)||!finite(d.productionReport.hour,0,d.hour)||typeof d.productionReport.by!=='string')throw Error('测产报告无效');
@@ -248,5 +248,95 @@ export function restore(raw,now=Date.now()) {
  if(!d.archives||typeof d.archives!=='object'||!d.autoClocks||!d.stats||!d.today||!d.lastDay||!finite(d.benefitFund,0,1e9))throw Error('经营数据无效');
  for(const v of Object.values(d.autoClocks))if(!finite(v,0,1000))throw Error('岗位进度无效');for(const field of ['stats','today','lastDay'])for(const k of Object.keys(blank[field]))if(!finite(d[field][k],0,1e12))throw Error('统计数据无效');
  for(const key of Object.keys(RES))if(d.resources[key]>capacity(d,key)+1e-6)throw Error('库存超过容量');
- const offline=Math.min(28800,Math.max(0,(now-d.savedAt)/1000));tick(d,offline);d.savedAt=now;return {state:d,offline};
+ validateGovernance(d);refreshUnlocks(d);if(!jobUnlocked(d,d.player.role))d.player.role='farmer';for(const n of members(d))if(n.job!=='idle'&&!jobUnlocked(d,n.job))n.job='idle';const offline=Math.min(28800,Math.max(0,(now-d.savedAt)/1000));tick(d,offline);d.savedAt=now;return {state:d,offline};
+}
+
+// 岗位开放、职责和信息传递是同一套规则，界面与操作共用。
+Object.assign(JOBS,{
+ hr:{...JOBS.hr,name:'人事弟子',kind:'执行',desc:'接触来客、进行面谈，按招聘目标接纳并提交具名考察。'},
+ treasurer:{...JOBS.treasurer,name:'库务弟子',kind:'执行',desc:'经办库存、交易和俸禄支付，向财务主管报送账簿。'},
+ foreman:{...JOBS.foreman,keys:[],desc:'接收灵植弟子的收成汇报，安排责任田与轮值，并上报部门情况。'},
+ hrChief:{name:'人事主管',icon:'任',kind:'管理',desc:'汇总人事弟子的具名考察与招聘进展，制定目标并向副宗主汇报。',keys:[],skill:'hrChief',building:'personnelOffice'},
+ financeChief:{name:'财务主管',icon:'筹',kind:'管理',desc:'汇总库务弟子的库存与收支报告，安排贸易目标并向副宗主汇报。',keys:[],skill:'financeChief',building:'financeOffice'}
+});
+Object.assign(BUILDINGS,{
+ personnelOffice:{name:'人事堂',icon:'任',desc:'建立人事主管岗位，汇总人事弟子的考察与招聘工作。',base:{wood:80,stone:45,coin:35,knowledge:12},scale:1.5,hours:10},
+ financeOffice:{name:'财务堂',icon:'筹',desc:'建立财务主管岗位，汇总库务经办报告。',base:{wood:85,stone:50,coin:35,knowledge:12},scale:1.5,hours:10}
+});
+export const ROLE_TREE={foreman:['farmer'],hrChief:['hr'],financeChief:['treasurer'],deputy:['foreman','hrChief','financeChief','builder','scholar','alchemist','auditor','investigator']};
+export const ROLE_GATES={
+ farmer:'开山即可任职',woodcutter:'累计收获 40 灵米',miner:'樵采累计取得 8 灵木',builder:'樵采取得 8 灵木，采石取得 6 青石',
+ hr:'建成弟子居',treasurer:'建成纳物仓',foreman:'至少 6 位弟子，且增开过灵田',scholar:'建成听雨书斋',
+ hrChief:'建成人事堂',financeChief:'建成财务堂',deputy:'建成议事堂、人事堂与财务堂',
+ auditor:'建成档案监察院并习得交接与复核',investigator:'建成巡察司',alchemist:'建成丹房并习得草木丹诀'
+};
+export function jobUnlocked(s,role){return !!s.unlockedJobs?.includes(role);}
+export function availableJobs(s){return (s.unlockedJobs||[]).filter(k=>Object.hasOwn(JOBS,k)).map(k=>[k,JOBS[k]]);}
+export function refreshUnlocks(s){
+ if(!s.unlockedJobs)return;
+ const b=s.buildings,g=s.gathered||{},built=Object.values(b).some(v=>v>0);
+ const ready={farmer:true,woodcutter:s.stats.produced>=40||built,miner:g.wood>=8||built,builder:(g.wood>=8&&g.stone>=6)||built,
+ hr:b.hut>0,treasurer:b.store>0,foreman:members(s).length>=6&&b.field>0,scholar:b.library>0,
+ hrChief:b.personnelOffice>0,financeChief:b.financeOffice>0,deputy:b.hall>0&&b.personnelOffice>0&&b.financeOffice>0,
+ auditor:b.registry>0&&s.techs.includes('records'),investigator:b.watchpost>0,alchemist:b.furnace>0&&s.techs.includes('alchemy')};
+ for(const [role,ok]of Object.entries(ready))if(ok&&!jobUnlocked(s,role)){s.unlockedJobs.push(role);log(s,`新职司开放：${JOBS[role].name}。${ROLE_GATES[role]}。`,'unlock');}
+}
+function recordWork(s,id,role,key,amount){if(!s.workRecords)return;const k=role+':'+id;const r=s.workRecords[k]??={role,actor:id,totals:{},last:{},hour:s.hour};if(r.hour!==s.hour){r.last={};r.hour=s.hour;}r.totals[key]=(r.totals[key]||0)+amount;r.last[key]=(r.last[key]||0)+amount;}
+function recordPlot(s,p,key,amount){p.owner??=s.plots.indexOf(p)===s.player.field?'player':staff(s,'farmer')[0]?.id||'player';p.harvest??={};p.harvest[key]=(p.harvest[key]||0)+amount;p.lastOutput={key,amount,hour:s.hour};recordWork(s,p.owner,'farmer',key,amount);}
+export function ownPlots(s,id='player'){return s.plots.map((p,index)=>({...p,index})).filter(p=>p.owner===id);}
+export function ownWork(s,role=s.player.role,id='player'){return structuredClone(s.workRecords?.[role+':'+id]||{role,actor:id,totals:{},last:{},hour:s.hour});}
+export function directReports(s,role=s.player.role){const children=ROLE_TREE[role]||[];return Object.values(s.workReports||{}).filter(r=>children.includes(r.role)).map(r=>structuredClone(r));}
+export function submitReport(s,job=s.player.role,by='player'){
+ if(!s.workReports)return null;
+ const n=typeof by==='number'?getPerson(s,by):null,who=n?.name||'亲自任职',id=n?.id||'player';let payload={},sources=[];
+ if(ROLE_TREE[job]){sources=directReports(s,job);payload={summary:sources.length?`收到 ${sources.length} 份下属具名报告。`:'尚未收到下属报告。',totals:{},assessments:[]};for(const r of sources){for(const[k,v]of Object.entries(r.payload.totals||{}))payload.totals[k]=(payload.totals[k]||0)+v;payload.assessments.push(...(r.payload.assessments||[]));}}
+ else if(job==='hr')payload={summary:`山门候选 ${s.candidates.length} 人；接纳目标 ${s.orders.hr.target} 人。`,candidateCount:s.candidates.length,assessments:Object.entries(s.archives).flatMap(([person,rows])=>rows.filter(r=>r.kind==='评价'&&r.by===who).map(r=>({person:Number(person),name:getPerson(s,person)?.name||'历史来客',...r}))),totals:{}};
+ else if(job==='treasurer'){let values={...s.resources};if(n&&s.incidents.some(i=>i.actor===n.id&&!i.resolved))values={...s.books};payload={summary:`库务上报上日收入 ${s.lastDay.revenue.toFixed(1)}，俸禄实付 ${s.lastDay.wages.toFixed(1)} 灵石。`,stocks:values,payroll:structuredClone(s.lastPayroll),revenue:s.lastDay.revenue,wages:s.lastDay.wages,totals:{}};}
+ else if(['auditor','investigator'].includes(job))payload={summary:`已移交 ${s.cases.length} 项线索。`,cases:s.cases.map(c=>caseView(s,c)),totals:{}};
+ else if(job==='builder')payload={summary:`经办 ${s.projects.length} 项营造。`,projects:structuredClone(s.projects),totals:ownWork(s,job,id).totals};
+ else payload={summary:'本岗负责范围的累计实收记录。',totals:ownWork(s,job,id).totals,plots:job==='farmer'?ownPlots(s,id).map(p=>({index:p.index,crop:p.crop,harvest:p.harvest||{}})):[]};
+ if(job==='financeChief'&&sources.length){const latest=[...sources].sort((a,b)=>b.hour-a.hour)[0];payload.stocks=structuredClone(latest.payload.stocks||{});payload.revenue=latest.payload.revenue||0;payload.wages=latest.payload.wages||0;payload.summary='依据库务上报：上日收入 '+payload.revenue.toFixed(1)+'，俸禄实付 '+payload.wages.toFixed(1)+' 灵石。';}
+ if(job==='hrChief'&&sources.length){payload.candidateCount=Math.max(...sources.map(r=>r.payload.candidateCount||0));payload.summary='人事弟子上报候选 '+payload.candidateCount+' 人；汇总 '+payload.assessments.length+' 份具名考察。';}
+ const report={role:job,by:who,actor:id,hour:s.hour,payload,sources};s.workReports[job+':'+id]=report;return null;
+}
+export function publish(s,job=s.player.role,by='player'){
+ submitReport(s,job,by);
+ if(!ROLE_TREE[job]&&job!=='farmer')publishLegacy(s,job,by==='player'?'亲自任职':by);
+ return null;
+}
+export function roleInformation(s,role=s.player.role){
+ const own=ownWork(s,role),manager=!!ROLE_TREE[role];return {role,kind:manager?'汇报汇总':'本岗实况',own,plots:role==='farmer'?ownPlots(s):[],reports:manager?directReports(s,role):[],tasks:s.inquiries.filter(q=>q.role===role).map(q=>({...q})),resourceKeys:manager?[]:role==='farmer'?Object.keys(own.totals).length?Object.keys(own.totals):['grain']:JOBS[role].keys};
+}
+export function nextRoleMilestone(s){const next=['woodcutter','miner','builder','hr','treasurer','foreman','scholar','hrChief','financeChief','deputy','auditor','investigator','alchemist'].find(k=>!jobUnlocked(s,k));return next?{role:next,name:JOBS[next].name,condition:ROLE_GATES[next]}:null;}
+export function act(s,a){
+ refreshUnlocks(s);const role=s.player.role;
+ if(a.type==='role'){if(!JOBS[a.role])return '岗位不存在';if(!jobUnlocked(s,a.role))return '岗位尚未开放：'+ROLE_GATES[a.role];s.player.role=a.role;return null;}
+ if(a.type==='tutorial'){if(!jobUnlocked(s,a.role||role))return '岗位尚未开放';if(!s.tutorialSeen.includes(a.role||role))s.tutorialSeen.push(a.role||role);return null;}
+ if(['assign','hire'].includes(a.type)){const job=a.job||s.orders.hr.priority;if(job!=='idle'&&!jobUnlocked(s,job))return '该岗位尚未开放';}
+ if(a.type==='crop'&&role==='farmer'&&s.plots[a.index]?.owner!=='player')return '只能照料自己负责的灵田';
+ if(a.type==='field-owner'){if(role!=='foreman')return '责任田由灵植队长安排';const p=s.plots[a.index];if(!p)return '灵田不存在';if(a.owner!=='player'&&!staff(s,'farmer').some(n=>n.id===Number(a.owner)))return '请选择灵植弟子';p.owner=a.owner==='player'?'player':Number(a.owner);return null;}
+ if(a.type==='policy'&&role!=='deputy')return '用工制度由副宗主制定';
+ if(a.type==='order'){
+  const allowed=a.section==='hr'?['hrChief','deputy']:a.section==='trade'?['financeChief','deputy']:['deputy'];
+  if(!allowed.includes(role))return '工作目标由相应主管制定';
+  if(a.key==='priority'&&!jobUnlocked(s,a.value))return '目标岗位尚未开放';
+  const prev=s.player.role;s.player.role='deputy';try{return actLegacy(s,a);}finally{s.player.role=prev;}
+ }
+ if(a.type==='publish')return publish(s);
+ if(a.type==='build'&&role!=='builder')return '营造项目由营造岗位执行';
+ if(a.type==='inquiry')return startInquiry(s,a.kind,a.caseId||null);
+ if(['hrChief','financeChief'].includes(role)&&!['assign','hours','shift','player-hours'].includes(a.type))return '主管通过下属报告和工作目标履职；请切换执行岗位处理具体业务';
+ return actLegacy(s,a);
+}
+function migrateRoles(s){
+ for(const key of ['hrChief','financeChief']){s.player.skills[key]??=10;for(const n of [...s.people,...s.candidates]){n.skills[key]??=10;n.potentials[key]??=1;}}
+ for(const key of ['personnelOffice','financeOffice'])s.buildings[key]??=0;
+ if(s.governance===undefined){s.governance=1;s.unlockedJobs=['farmer'];s.tutorialSeen=[];s.workRecords={};s.workReports={};s.gathered={wood:0,stone:0};s.player.field=0;s.plots.forEach((p,i)=>p.owner=i===0?'player':s.people[i%s.people.length]?.id||'player');s.logs=s.logs.filter(l=>l.kind==='milestone'||l.kind==='unlock');}
+}
+function validateGovernance(s){
+ if(s.governance!==1||!Array.isArray(s.unlockedJobs)||s.unlockedJobs.some(k=>!Object.hasOwn(JOBS,k))||!s.unlockedJobs.includes('farmer')||!Array.isArray(s.tutorialSeen)||s.tutorialSeen.some(k=>!Object.hasOwn(JOBS,k)))throw Error('岗位开放记录无效');
+ if(!s.workRecords||!s.workReports||!s.gathered||Object.values(s.gathered).some(v=>!Number.isFinite(v)||v<0))throw Error('岗位工作记录无效');
+ for(const p of s.plots)if(p.owner!=='player'&&!s.people.some(n=>n.id===p.owner))throw Error('责任田记录无效');
+ for(const r of Object.values(s.workRecords))if(!JOBS[r.role]||Object.values(r.totals||{}).some(v=>!Number.isFinite(v)||v<0))throw Error('实收记录无效');
+ const check=(r,depth=0)=>{if(depth>3||!JOBS[r.role]||typeof r.by!=='string'||!Number.isFinite(r.hour)||r.hour<0||r.hour>s.hour||!r.payload||typeof r.payload.summary!=='string'||!Array.isArray(r.sources)||r.sources.length>100)throw Error('岗位报告无效');for(const c of r.sources)check(c,depth+1);};for(const r of Object.values(s.workReports))check(r);
 }
